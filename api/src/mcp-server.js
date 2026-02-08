@@ -70,20 +70,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['filePath'],
         },
       },
-      {
-        name: 'analyze_pdf',
-        description: 'Analyze a PDF file to see how it would be split into chunks for translation. Shows the number of chunks, page ranges, and sizes without performing translation.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            filePath: {
-              type: 'string',
-              description: 'Absolute path to the PDF file to analyze',
-            },
-          },
-          required: ['filePath'],
-        },
-      },
     ],
   };
 });
@@ -95,43 +81,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   logger.info(`Received tool call: ${name}`);
 
   try {
-    if (name === 'analyze_pdf') {
-      const { filePath } = args;
-
-      logger.info(`Analyzing PDF: ${filePath}`);
-
-      // Read the PDF file
-      const buffer = await fs.readFile(filePath);
-      const chunks = await pdfSplitter.splitPDF(buffer);
-
-      const analysis = {
-        filename: path.basename(filePath),
-        totalSize: buffer.length,
-        totalSizeReadable: `${(buffer.length / 1024 / 1024).toFixed(2)} MB`,
-        chunks: chunks.map((chunk, index) => ({
-          index: index + 1,
-          startPage: chunk.startPage,
-          endPage: chunk.endPage,
-          pages: chunk.endPage - chunk.startPage + 1,
-          size: chunk.size,
-          sizeReadable: `${(chunk.size / 1024 / 1024).toFixed(2)} MB`,
-        })),
-        totalChunks: chunks.length,
-        willBeSplit: chunks.length > 1,
-      };
-
-      logger.info(`Analysis complete: ${chunks.length} chunks`);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(analysis, null, 2),
-          },
-        ],
-      };
-    }
-
     if (name === 'translate_pdf') {
       const { filePath, sourceLang = 'en', targetLang = 'es', outputPath } = args;
 

@@ -14,16 +14,31 @@ export class GoogleTranslator {
   async init() {
     if (!this.browser) {
       this.logger.info(`Launching browser in ${DEV_MODE ? 'VISIBLE' : 'headless'} mode`);
-      this.browser = await chromium.launch({
+
+      const launchOptions = {
         headless: !DEV_MODE,
         slowMo: DEV_MODE ? 500 : 0,
-        // Disable incognito mode features
-        channel: 'chrome', // Use regular Chrome instead of Chromium
         args: [
           '--disable-blink-features=AutomationControlled',
-          '--disable-web-security'
+          '--disable-infobars',
+          '--window-size=1920,1080',
+          '--start-maximized',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--hide-scrollbars',
+          '--mute-audio',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
         ]
-      });
+      };
+
+      this.browser = await chromium.launch(launchOptions);
       this.logger.info('Browser launched successfully');
     }
   }
@@ -50,10 +65,69 @@ export class GoogleTranslator {
     const context = await this.browser.newContext({
       acceptDownloads: true,
       viewport: { width: 1920, height: 1080 },
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      locale: 'es-ES',
+      timezoneId: 'America/Mexico_City',
+      colorScheme: 'light',
+      extraHTTPHeaders: {
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
+      }
     });
 
     const page = await context.newPage();
+
+    // Add stealth scripts to evade bot detection
+    await page.addInitScript(() => {
+      // Override the navigator.webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+
+      // Override the navigator.plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => {
+          return [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+          ];
+        },
+      });
+
+      // Override navigator.languages
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['es-ES', 'es', 'en-US', 'en'],
+      });
+
+      // Mock chrome property properly
+      if (!window.chrome) {
+        window.chrome = {};
+      }
+      window.chrome.runtime = {
+        connect: () => {},
+        sendMessage: () => {},
+      };
+
+      // Override permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+
+      // Add additional browser properties
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+      });
+
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+      });
+
+      // Override automation-related properties
+      delete navigator.__proto__.webdriver;
+    });
 
     // Enable download events logging
     page.on('download', async download => {
@@ -76,7 +150,7 @@ export class GoogleTranslator {
 
       this.logger.info(`Uploading file: ${filePath}`);
       await fileInput.setInputFiles(filePath);
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000); // Give more time for file to upload
       await this.takeScreenshot(page, '02-file-uploaded');
 
       // Wait for and click the translate button
@@ -106,7 +180,16 @@ export class GoogleTranslator {
       await this.takeScreenshot(page, '03-before-translate-click');
       this.logger.info('Clicking translate button...');
       await translateButton.click();
+
+      // Wait a bit for the translation to start
+      await page.waitForTimeout(2000);
       await this.takeScreenshot(page, '04-after-translate-click');
+
+      // Check if page/context is still open
+      if (page.isClosed()) {
+        this.logger.error('Page was closed after clicking translate button!');
+        throw new Error('Google Translate closed the page - possible bot detection');
+      }
 
       // Wait for translation to complete by looking for the download button
       this.logger.info('Waiting for translation to complete...');
@@ -126,6 +209,12 @@ export class GoogleTranslator {
         if (downloadButtonFound) break;
 
         try {
+          // Check if page is still open before waiting
+          if (page.isClosed()) {
+            this.logger.error('Page closed while waiting for download button');
+            throw new Error('Google Translate closed the page - possible bot detection or translation failed');
+          }
+
           this.logger.info(`Looking for download button with text: "${buttonText}"`);
           downloadButton = page.getByRole('button', { name: buttonText });
           await downloadButton.waitFor({ state: 'visible', timeout: 180000 }); // 3 minutes
@@ -133,6 +222,11 @@ export class GoogleTranslator {
           downloadButtonFound = true;
           break;
         } catch (err) {
+          // Check if error is due to page/context being closed
+          if (err.message && err.message.includes('Target page, context or browser has been closed')) {
+            this.logger.error('Page/context/browser was closed while waiting for download button');
+            throw new Error('Google Translate closed the page - likely bot detection. Try enabling DEV_MODE=true to debug.');
+          }
           this.logger.warn(`Download button "${buttonText}" not found: ${err.message}`);
         }
       }
@@ -190,8 +284,31 @@ export class GoogleTranslator {
 
     } catch (error) {
       this.logger.error(`Translation error: ${error.message}`);
-      await this.takeScreenshot(page, '99-error');
-      await context.close();
+
+      try {
+        if (!page.isClosed()) {
+          await this.takeScreenshot(page, '99-error');
+        }
+      } catch (screenshotErr) {
+        this.logger.warn(`Could not take error screenshot: ${screenshotErr.message}`);
+      }
+
+      try {
+        await context.close();
+      } catch (closeErr) {
+        this.logger.warn(`Could not close context: ${closeErr.message}`);
+      }
+
+      // If browser is in a bad state, close it so next attempt recreates it
+      if (error.message && error.message.includes('Target page, context or browser has been closed')) {
+        this.logger.warn('Browser appears to be in bad state, closing it for next attempt');
+        try {
+          await this.close();
+        } catch (browserCloseErr) {
+          this.logger.warn(`Could not close browser: ${browserCloseErr.message}`);
+        }
+      }
+
       throw new Error(`Translation failed: ${error.message}`);
     }
   }

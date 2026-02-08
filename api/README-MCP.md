@@ -9,10 +9,6 @@ Model Context Protocol (MCP) server for translating PDF documents using Google T
   - Translates each chunk using Google Translate
   - Merges translated chunks back into a single PDF
 
-- **analyze_pdf**: Analyze how a PDF would be split into chunks
-  - Shows number of chunks, page ranges, and sizes
-  - No translation performed
-
 ## Installation
 
 ```bash
@@ -71,11 +67,11 @@ Add this to your `claude_desktop_config.json`:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-## Tools
+## Tool
 
 ### translate_pdf
 
-Translate a PDF document.
+Translate a PDF document from one language to another.
 
 **Parameters:**
 - `filePath` (required): Absolute path to the PDF file
@@ -100,47 +96,6 @@ Translate /Users/me/document.pdf from English to Spanish
   "targetLang": "es",
   "fileSize": 15728640,
   "fileSizeReadable": "15.00 MB"
-}
-```
-
-### analyze_pdf
-
-Analyze a PDF file to see how it would be split.
-
-**Parameters:**
-- `filePath` (required): Absolute path to the PDF file
-
-**Example usage in Claude:**
-```
-Analyze /Users/me/large-document.pdf
-```
-
-**Response:**
-```json
-{
-  "filename": "large-document.pdf",
-  "totalSize": 25887325,
-  "totalSizeReadable": "24.69 MB",
-  "chunks": [
-    {
-      "index": 1,
-      "startPage": 1,
-      "endPage": 25,
-      "pages": 25,
-      "size": 9437184,
-      "sizeReadable": "9.00 MB"
-    },
-    {
-      "index": 2,
-      "startPage": 26,
-      "endPage": 50,
-      "pages": 25,
-      "size": 8000000,
-      "sizeReadable": "7.63 MB"
-    }
-  ],
-  "totalChunks": 2,
-  "willBeSplit": true
 }
 ```
 
