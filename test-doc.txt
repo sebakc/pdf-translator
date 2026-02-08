@@ -1,0 +1,2 @@
+Hello world! This is a test document.
+This document will be used to test the Google Translate automation.
